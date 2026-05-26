@@ -262,29 +262,111 @@ function addWarning(userId) { warnings[userId] = (warnings[userId] || 0) + 1; sa
 function resetWarnings(userId) { delete warnings[userId]; saveWarnings(); }
 
 // ============================================================
-// 🎵  تحميل يوتيوب
+// 🎵  تحميل يوتيوب — مع اكتشاف تلقائي لـ yt-dlp
 // ============================================================
 const youtubeCooldowns = new Map();
 
+// اكتشاف مسار yt-dlp عند تشغيل البوت
+function detectYtDlp() {
+  const candidates = [
+    'yt-dlp',
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    path.join(process.env.HOME || '', '.local/bin/yt-dlp'),
+  ];
+  for (const cmd of candidates) {
+    try {
+      const { execSync } = require('child_process');
+      execSync(`${cmd} --version`, { stdio: 'pipe' });
+      console.log(`✅ yt-dlp found: ${cmd}`);
+      return { type: 'binary', cmd };
+    } catch (_) {}
+  }
+  // جرب python3 -m yt_dlp
+  for (const py of ['python3', 'python']) {
+    try {
+      const { execSync } = require('child_process');
+      execSync(`${py} -m yt_dlp --version`, { stdio: 'pipe' });
+      console.log(`✅ yt-dlp found via ${py} module`);
+      return { type: 'module', cmd: `${py} -m yt_dlp` };
+    } catch (_) {}
+  }
+  console.warn('⚠️  yt-dlp غير موجود! شغّل: bash setup_ytdlp.sh');
+  return null;
+}
+
+const YTDLP = detectYtDlp();
+
+function buildYtDlpCommand(ytdlp, safeName, outputTemplate) {
+  const base = ytdlp ? ytdlp.cmd : 'yt-dlp';
+  return (
+    `${base} -x --audio-format mp3 --audio-quality 0 ` +
+    `--max-filesize 15m ` +
+    `--write-thumbnail --convert-thumbnails jpg ` +
+    `--no-playlist ` +
+    `--socket-timeout 30 ` +
+    `-o "${outputTemplate}" ` +
+    `"ytsearch1:${safeName}"`
+  );
+}
+
+function collectResults(audioDir) {
+  if (!fs.existsSync(audioDir)) return { audioPath: null, thumbPath: null };
+  const allFiles = fs.readdirSync(audioDir);
+  const mp3Files = allFiles.filter(f => f.endsWith('.mp3'));
+  if (mp3Files.length === 0) return { audioPath: null, thumbPath: null };
+  const latestAudio = mp3Files
+    .map(f => ({ name: f, time: fs.statSync(path.join(audioDir, f)).mtime }))
+    .sort((a, b) => b.time - a.time)[0];
+  const audioPath = path.join(audioDir, latestAudio.name);
+  const thumbFiles = allFiles.filter(f => f.endsWith('.jpg') || f.endsWith('.png') || f.endsWith('.webp'));
+  const latestThumb = thumbFiles.length > 0
+    ? thumbFiles.map(f => ({ name: f, time: fs.statSync(path.join(audioDir, f)).mtime })).sort((a, b) => b.time - a.time)[0]
+    : null;
+  const thumbPath = latestThumb ? path.join(audioDir, latestThumb.name) : null;
+  return { audioPath, thumbPath };
+}
+
 function downloadYouTubeAudio(songName) {
   return new Promise((resolve, reject) => {
+    if (!YTDLP) {
+      reject(new Error('yt-dlp غير مثبت على السيرفر.\nشغّل: bash setup_ytdlp.sh'));
+      return;
+    }
     if (!fs.existsSync(CONFIG.AUDIO_DIR)) fs.mkdirSync(CONFIG.AUDIO_DIR, { recursive: true });
+
     const safeName = songName.replace(/[^a-zA-Z0-9\u0600-\u06FF\s]/g, '').trim();
     const timestamp = Date.now();
     const outputTemplate = path.join(CONFIG.AUDIO_DIR, timestamp + '.%(ext)s');
-    const command = `python -m yt_dlp -x --audio-format mp3 --audio-quality 0 --max-filesize 15m --write-thumbnail --convert-thumbnails jpg -o "${outputTemplate}" "ytsearch1:${safeName}"`;
-    exec(command, { timeout: 120000 }, (error, stdout, stderr) => {
-      if (error) { reject(new Error('فشل تحميل الأغنية')); return; }
-      if (!fs.existsSync(CONFIG.AUDIO_DIR)) { reject(new Error('مجلد الأغاني غير موجود')); return; }
-      const allFiles = fs.readdirSync(CONFIG.AUDIO_DIR);
-      const mp3Files = allFiles.filter(f => f.endsWith('.mp3'));
-      if (mp3Files.length === 0) { reject(new Error('لم يتم العثور على ملف الأغنية')); return; }
-      const latestAudio = mp3Files.map(f => ({ name: f, time: fs.statSync(path.join(CONFIG.AUDIO_DIR, f)).mtime })).sort((a, b) => b.time - a.time)[0];
-      const audioPath = path.join(CONFIG.AUDIO_DIR, latestAudio.name);
-      const thumbFiles = allFiles.filter(f => f.endsWith('.jpg') || f.endsWith('.png') || f.endsWith('.webp'));
-      const latestThumb = thumbFiles.length > 0 ? thumbFiles.map(f => ({ name: f, time: fs.statSync(path.join(CONFIG.AUDIO_DIR, f)).mtime })).sort((a, b) => b.time - a.time)[0] : null;
-      const thumbPath = latestThumb ? path.join(CONFIG.AUDIO_DIR, latestThumb.name) : null;
-      resolve({ audioPath, thumbPath });
+    const command = buildYtDlpCommand(YTDLP, safeName, outputTemplate);
+
+    console.log(`\n🎵 yt-dlp CMD: ${command}`);
+
+    exec(command, { timeout: 180000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('❌ yt-dlp stderr:', stderr?.slice(0, 500));
+        // لو ffmpeg مش موجود → رسالة واضحة
+        if (stderr && stderr.includes('ffmpeg')) {
+          reject(new Error('ffmpeg غير مثبت. شغّل: bash setup_ytdlp.sh'));
+          return;
+        }
+        // محاولة تانية بدون thumbnail
+        const cmd2 = buildYtDlpCommand(YTDLP, safeName, outputTemplate).replace('--write-thumbnail --convert-thumbnails jpg ', '');
+        exec(cmd2, { timeout: 180000 }, (err2, out2, serr2) => {
+          if (err2) {
+            console.error('❌ yt-dlp retry stderr:', serr2?.slice(0, 300));
+            reject(new Error('فشل تحميل الأغنية بعد المحاولتين'));
+            return;
+          }
+          const result = collectResults(CONFIG.AUDIO_DIR);
+          if (!result.audioPath) { reject(new Error('لم يتم العثور على ملف MP3')); return; }
+          resolve(result);
+        });
+        return;
+      }
+      const result = collectResults(CONFIG.AUDIO_DIR);
+      if (!result.audioPath) { reject(new Error('لم يتم العثور على ملف MP3 بعد التحميل')); return; }
+      resolve(result);
     });
   });
 }
