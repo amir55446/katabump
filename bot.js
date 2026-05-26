@@ -1288,4 +1288,41 @@ client.on('disconnected', (reason) => {
   console.log('⚠️ انقطع الاتصال:', reason);
   console.log('🔄 إعادة الاتصال خلال 10 ثوانٍ...');
   setTimeout(() => {
-    client.initi
+    client.initialize().catch(err => console.error('❌ فشل إعادة الاتصال:', err.message));
+  }, 10000);
+});
+
+client.on('auth_failure', (msg) => {
+  console.error('❌ فشل التوثيق:', msg);
+  console.log('💡 احذف مجلد .wwebjs_auth وأعد التشغيل.');
+});
+
+// ============================================================
+// 🚀  تشغيل
+// ============================================================
+console.log('════════════════════════════════════════');
+console.log('   بوت واتساب — جاري التشغيل...');
+console.log('════════════════════════════════════════\n');
+
+const loadMsgs = ['⏳ فتح Chrome...', '🌐 الاتصال بواتساب...', '🔄 تحميل الجلسة...', '📡 مزامنة...'];
+let li = 0, ld = 0;
+const loadTimer = setInterval(() => {
+  ld = (ld + 1) % 4;
+  process.stdout.write(`\r${loadMsgs[li]}${ '.'.repeat(ld + 1) }   `);
+  if (ld === 3) li = (li + 1) % loadMsgs.length;
+}, 600);
+
+client.initialize().catch(err => {
+  console.error('❌ فشل تشغيل البوت:', err.message);
+  process.exit(1);
+});
+
+process.on('SIGINT', () => {
+  console.log('\n👋 إيقاف البوت...');
+  if (fs.existsSync(CONFIG.AUDIO_DIR)) {
+    fs.readdirSync(CONFIG.AUDIO_DIR).forEach(f => {
+      try { fs.unlinkSync(path.join(CONFIG.AUDIO_DIR, f)); } catch (_) {}
+    });
+  }
+  process.exit(0);
+});
