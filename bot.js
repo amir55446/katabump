@@ -470,65 +470,29 @@ const client = new Client({
 // ============================================================
 // 📱  كود الربط
 // ============================================================
-let pairingCodeRequested = false; // منع التكرار
-
 client.on('qr', async () => {
-  // لو طلبنا الكود قبل كدا، متطلبوش تاني
-  if (pairingCodeRequested) return;
-  pairingCodeRequested = true;
-
   clearInterval(loadTimer);
   console.clear();
-
-  console.log('════════════════════════════════════════');
-  console.log('   🔗 ربط واتساب عن طريق كود الربط');
-  console.log(`   📱 الرقم: +${BOT_NUMBER}`);
-  console.log('════════════════════════════════════════\n');
-
-  // ✅ انتظر 5 ثواني عشان WhatsApp Web يكمل التحميل
-  console.log('⏳ انتظار تحميل WhatsApp Web...');
-  await new Promise(r => setTimeout(r, 5000));
-  console.log('⏳ جاري طلب كود الربط...\n');
-
-  // ✅ حاول 3 مرات لو فشل
-  let code = null;
-  let lastErr = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      code = await client.requestPairingCode(BOT_NUMBER);
-      break; // نجح
-    } catch (err) {
-      lastErr = err;
-      console.warn(`⚠️  محاولة ${attempt}/3 فشلت: ${err.message}`);
-      if (attempt < 3) {
-        console.log('⏳ إعادة المحاولة بعد 5 ثواني...');
-        await new Promise(r => setTimeout(r, 5000));
-      }
-    }
+  try {
+    console.log('════════════════════════════════════════');
+    console.log('   🔗 ربط واتساب عن طريق كود الربط');
+    console.log(`   📱 الرقم: +${BOT_NUMBER}`);
+    console.log('════════════════════════════════════════\n');
+    console.log('⏳ جاري طلب كود الربط...\n');
+    const code = await client.requestPairingCode(BOT_NUMBER);
+    console.log('════════════════════════════════════════');
+    console.log('   ✅ كود الربط الخاص بك:');
+    console.log(`\n        🔑  ${code}\n`);
+    console.log('════════════════════════════════════════');
+    console.log('\n الخطوات:');
+    console.log('   1. افتح واتساب على هاتفك');
+    console.log('   2. الإعدادات ← الأجهزة المرتبطة');
+    console.log('   3. ربط جهاز ← ربط بالرقم بدلاً من الـ QR');
+    console.log(`   4. أدخل الكود أعلاه\n`);
+  } catch (err) {
+    console.error('❌ فشل طلب كود الربط:', err.message);
+    process.exit(1);
   }
-
-  if (!code) {
-    console.error('❌ فشل طلب كود الربط بعد 3 محاولات:', lastErr?.message);
-    console.log('\n💡 تأكد من:');
-    console.log('   • الرقم صح بالصيغة الدولية (بدون +)');
-    console.log('   • واتساب مثبت على الهاتف وشغال');
-    console.log('   • مش مربوط بجهاز تاني دلوقتي');
-    console.log('   • احذف مجلد .wwebjs_auth وأعد التشغيل\n');
-    // مش بنعمل process.exit عشان البوت ممكن يحاول تاني
-    pairingCodeRequested = false;
-    return;
-  }
-
-  console.log('════════════════════════════════════════');
-  console.log('   ✅ كود الربط الخاص بك:');
-  console.log(`\n        🔑  ${code}\n`);
-  console.log('════════════════════════════════════════');
-  console.log('\n📋 الخطوات:');
-  console.log('   1. افتح واتساب على هاتفك');
-  console.log('   2. الإعدادات ← الأجهزة المرتبطة');
-  console.log('   3. ربط جهاز ← ربط بالرقم بدلاً من الـ QR');
-  console.log('   4. أدخل الكود أعلاه\n');
-  console.log('⏰ الكود صالح لمدة دقيقتين فقط!\n');
 });
 
 // ============================================================
